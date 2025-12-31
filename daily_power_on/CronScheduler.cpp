@@ -7,21 +7,22 @@
 #include "CronScheduler.h"
 
 CronScheduler::CronScheduler() 
-  : _uploadMillis(0), _nextExecutionMillis(0), _initialized(false), _firstExecutionDone(false) {
+  : _mode(MODE_CRON), _uploadMillis(0), _nextExecutionMillis(0), 
+    _intervalSeconds(0), _initialized(false), _firstExecutionDone(false) {
   memset(&_cron, 0, sizeof(CronExpression));
   memset(&_uploadTime, 0, sizeof(DateTime));
 }
 
-bool CronScheduler::init(const char* uploadDateTime, const char* cronSchedule) {
+bool CronScheduler::init(const char* uploadDateTime, const char* schedule) {
   // 日時のパース
   if (!parseDateTime(uploadDateTime)) {
     Serial.println(F("[CRON] ERROR: Failed to parse upload datetime"));
     return false;
   }
   
-  // Cron式のパース
-  if (!parseCronExpression(cronSchedule)) {
-    Serial.println(F("[CRON] ERROR: Failed to parse cron expression"));
+  // スケジュール文字列の解析と初期化
+  if (!initializeSchedule(schedule)) {
+    Serial.println(F("[CRON] ERROR: Failed to parse schedule"));
     return false;
   }
   
@@ -29,9 +30,52 @@ bool CronScheduler::init(const char* uploadDateTime, const char* cronSchedule) {
   _uploadMillis = millis();
   
   // 次回実行時刻を計算
-  calculateNextExecution();
+  if (_mode == MODE_CRON) {
+    calculateNextExecutionCron();
+  } else {
+    calculateNextExecutionInterval();
+  }
   
   _initialized = true;
+  return true;
+}
+
+bool CronScheduler::initializeSchedule(const char* schedule) {
+  // スペースを含むかチェック（Cron式の判定）
+  bool hasCronFormat = false;
+  for (int i = 0; schedule[i] != '\0'; i++) {
+    if (schedule[i] == ' ') {
+      hasCronFormat = true;
+      break;
+    }
+  }
+  
+  if (hasCronFormat) {
+    // Cron式モード
+    _mode = MODE_CRON;
+    return parseCronExpression(schedule);
+  } else {
+    // 秒間隔モード
+    _mode = MODE_INTERVAL;
+    return parseIntervalSeconds(schedule);
+  }
+}
+
+bool CronScheduler::parseIntervalSeconds(const char* intervalStr) {
+  // 数値のみかチェック
+  for (int i = 0; intervalStr[i] != '\0'; i++) {
+    if (intervalStr[i] < '0' || intervalStr[i] > '9') {
+      return false;  // 数字以外が含まれている
+    }
+  }
+  
+  long interval = atol(intervalStr);
+  
+  if (interval <= 0 || interval > 86400) {  // 0秒 < interval <= 24時間
+    return false;
+  }
+  
+  _intervalSeconds = interval;
   return true;
 }
 
@@ -59,7 +103,7 @@ bool CronScheduler::parseDateTime(const char* dateTimeStr) {
 
 bool CronScheduler::parseCronExpression(const char* cronStr) {
   // フォーマット: "分 時 日 月 曜日"
-  char minute[10], hour[10], day[10], month[10], weekday[10];
+  char minute[20], hour[20], day[20], month[20], weekday[20];
   
   int parsed = sscanf(cronStr, "%s %s %s %s %s", minute, hour, day, month, weekday);
   
@@ -67,24 +111,50 @@ bool CronScheduler::parseCronExpression(const char* cronStr) {
     return false;
   }
   
-  // 各フィールドをパース（* は -1）
-  _cron.minute = (strcmp(minute, "*") == 0) ? -1 : atoi(minute);
-  _cron.hour = (strcmp(hour, "*") == 0) ? -1 : atoi(hour);
-  _cron.day = (strcmp(day, "*") == 0) ? -1 : atoi(day);
-  _cron.month = (strcmp(month, "*") == 0) ? -1 : atoi(month);
-  _cron.weekday = (strcmp(weekday, "*") == 0) ? -1 : atoi(weekday);
-  
-  // 範囲チェック
-  if (_cron.minute != -1 && (_cron.minute < 0 || _cron.minute > 59)) return false;
-  if (_cron.hour != -1 && (_cron.hour < 0 || _cron.hour > 23)) return false;
-  if (_cron.day != -1 && (_cron.day < 1 || _cron.day > 31)) return false;
-  if (_cron.month != -1 && (_cron.month < 1 || _cron.month > 12)) return false;
-  if (_cron.weekday != -1 && (_cron.weekday < 0 || _cron.weekday > 6)) return false;
+  // 各フィールドをパース（ステップ値対応）
+  if (!parseCronField(minute, _cron.minute, 0, 59)) return false;
+  if (!parseCronField(hour, _cron.hour, 0, 23)) return false;
+  if (!parseCronField(day, _cron.day, 1, 31)) return false;
+  if (!parseCronField(month, _cron.month, 1, 12)) return false;
+  if (!parseCronField(weekday, _cron.weekday, 0, 6)) return false;
   
   return true;
 }
 
-void CronScheduler::calculateNextExecution() {
+bool CronScheduler::parseCronField(const char* fieldStr, CronField& field, int minVal, int maxVal) {
+  field.isWildcard = false;
+  field.isStep = false;
+  field.value = 0;
+  
+  // ワイルドカードチェック
+  if (strcmp(fieldStr, "*") == 0) {
+    field.isWildcard = true;
+    return true;
+  }
+  
+  // ステップ値チェック（*/n 形式）
+  if (fieldStr[0] == '*' && fieldStr[1] == '/') {
+    field.isStep = true;
+    field.value = atoi(fieldStr + 2);  // "*/5" → 5
+    
+    if (field.value <= 0 || field.value > maxVal) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  // 数値チェック（n/m 形式には未対応）
+  field.value = atoi(fieldStr);
+  
+  if (field.value < minVal || field.value > maxVal) {
+    return false;
+  }
+  
+  return true;
+}
+
+void CronScheduler::calculateNextExecutionCron() {
   // 書き込み時刻から次のCron一致時刻を検索
   DateTime nextTime = _uploadTime;
   
@@ -105,20 +175,50 @@ void CronScheduler::calculateNextExecution() {
   _nextExecutionMillis = _uploadMillis + 86400000UL;  // とりあえず24時間後
 }
 
+void CronScheduler::calculateNextExecutionInterval() {
+  // 秒間隔モード: 起動直後に実行し、以降は指定秒数ごと
+  _nextExecutionMillis = _uploadMillis;  // 即座に実行
+}
+
 bool CronScheduler::matchesCron(const DateTime& dt) {
-  if (_cron.minute != -1 && dt.minute != _cron.minute) return false;
-  if (_cron.hour != -1 && dt.hour != _cron.hour) return false;
-  if (_cron.day != -1 && dt.day != _cron.day) return false;
-  if (_cron.month != -1 && dt.month != _cron.month) return false;
-  if (_cron.weekday != -1 && dt.weekday != _cron.weekday) return false;
+  if (!matchesCronField(_cron.minute, dt.minute)) return false;
+  if (!matchesCronField(_cron.hour, dt.hour)) return false;
+  if (!matchesCronField(_cron.day, dt.day)) return false;
+  if (!matchesCronField(_cron.month, dt.month)) return false;
+  if (!matchesCronField(_cron.weekday, dt.weekday)) return false;
   
   // 秒は00秒のみ（Cronは分単位）
   return (dt.second == 0);
 }
 
+bool CronScheduler::matchesCronField(const CronField& field, int value) {
+  // ワイルドカードは常に一致
+  if (field.isWildcard) {
+    return true;
+  }
+  
+  // ステップ値の場合
+  if (field.isStep) {
+    return (value % field.value) == 0;
+  }
+  
+  // 通常の値比較
+  return field.value == value;
+}
+
 bool CronScheduler::shouldExecute(unsigned long currentMillis) {
   if (!_initialized) return false;
   
+  if (_mode == MODE_INTERVAL) {
+    // 秒間隔モード
+    if (currentMillis >= _nextExecutionMillis) {
+      _nextExecutionMillis = currentMillis + (_intervalSeconds * 1000UL);
+      return true;
+    }
+    return false;
+  }
+  
+  // Cronモード
   // 初回実行チェック
   if (!_firstExecutionDone && currentMillis >= _nextExecutionMillis) {
     _firstExecutionDone = true;
@@ -177,6 +277,14 @@ void CronScheduler::printDebugInfo() {
   Serial.println(F("[CRON] Scheduler Debug Info"));
   Serial.println(F("========================================"));
   
+  // スケジュールモード
+  Serial.print(F("Schedule Mode: "));
+  if (_mode == MODE_CRON) {
+    Serial.println(F("Cron Expression"));
+  } else {
+    Serial.println(F("Interval (seconds)"));
+  }
+  
   // 書き込み日時
   Serial.print(F("Upload DateTime: "));
   Serial.print(_uploadTime.year);
@@ -196,18 +304,24 @@ void CronScheduler::printDebugInfo() {
   if (_uploadTime.second < 10) Serial.print(F("0"));
   Serial.println(_uploadTime.second);
   
-  // Cron式
-  Serial.print(F("Cron Expression: "));
-  if (_cron.minute == -1) Serial.print(F("*")); else Serial.print(_cron.minute);
-  Serial.print(F(" "));
-  if (_cron.hour == -1) Serial.print(F("*")); else Serial.print(_cron.hour);
-  Serial.print(F(" "));
-  if (_cron.day == -1) Serial.print(F("*")); else Serial.print(_cron.day);
-  Serial.print(F(" "));
-  if (_cron.month == -1) Serial.print(F("*")); else Serial.print(_cron.month);
-  Serial.print(F(" "));
-  if (_cron.weekday == -1) Serial.print(F("*")); else Serial.print(_cron.weekday);
-  Serial.println();
+  // スケジュール詳細
+  if (_mode == MODE_CRON) {
+    Serial.print(F("Cron Expression: "));
+    printCronField(_cron.minute);
+    Serial.print(F(" "));
+    printCronField(_cron.hour);
+    Serial.print(F(" "));
+    printCronField(_cron.day);
+    Serial.print(F(" "));
+    printCronField(_cron.month);
+    Serial.print(F(" "));
+    printCronField(_cron.weekday);
+    Serial.println();
+  } else {
+    Serial.print(F("Interval: "));
+    Serial.print(_intervalSeconds);
+    Serial.println(F(" seconds"));
+  }
   
   // 次回実行まで
   char buffer[32];
@@ -216,6 +330,17 @@ void CronScheduler::printDebugInfo() {
   Serial.println(buffer);
   
   Serial.println(F("========================================\n"));
+}
+
+void CronScheduler::printCronField(const CronField& field) {
+  if (field.isWildcard) {
+    Serial.print(F("*"));
+  } else if (field.isStep) {
+    Serial.print(F("*/"));
+    Serial.print(field.value);
+  } else {
+    Serial.print(field.value);
+  }
 }
 
 // ========================================

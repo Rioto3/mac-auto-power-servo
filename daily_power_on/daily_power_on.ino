@@ -1,7 +1,7 @@
 /*
  * Mac Auto Power Servo - Daily Power On (Cron Version)
  * 
- * Cron式でスケジュール管理するMacBook電源自動ON装置
+ * Cron式または秒間隔でスケジュール管理するMacBook電源自動ON装置
  * 
  * 接続:
  * - サーボ信号線: A1ピン
@@ -10,15 +10,26 @@
  * 
  * 使い方:
  * 1. UPLOAD_DATETIME に書き込み時のUTC日時を設定
- * 2. CRON_SCHEDULE に実行スケジュールをCron式で設定
+ * 2. SCHEDULE に実行スケジュールを設定
  * 3. Arduino にアップロード
  * 
- * Cron式フォーマット: "分 時 日 月 曜日"
- * 例:
- *   "0 9 * * *"    → 毎日9:00 UTC
- *   "30 14 * * *"  → 毎日14:30 UTC
- *   "0 6 1 * *"    → 毎月1日6:00 UTC
- *   "0 0 * * 1"    → 毎週月曜0:00 UTC
+ * スケジュール設定方法:
+ * 
+ * A) Cron式（分単位）
+ *    フォーマット: "分 時 日 月 曜日"
+ *    例:
+ *      "0 9 * * *"     → 毎日9:00 UTC
+ *      "30 14 * * *"   → 毎日14:30 UTC
+ *      "*/5 * * * *"   → 5分ごと
+ *      "0 */2 * * *"   → 2時間ごと
+ *      "0 6 1 * *"     → 毎月1日6:00 UTC
+ *      "0 0 * * 1"     → 毎週月曜0:00 UTC
+ * 
+ * B) 秒間隔（整数のみ）
+ *    例:
+ *      "60"    → 60秒ごと
+ *      "300"   → 300秒（5分）ごと
+ *      "10"    → 10秒ごと（テスト用）
  */
 
 #include <Servo.h>
@@ -32,9 +43,11 @@
 // フォーマット: "YYYY-MM-DD HH:MM:SS"
 const char* UPLOAD_DATETIME = "2025-12-31 15:30:00";
 
-// 実行スケジュール (Cron式)
-// フォーマット: "分 時 日 月 曜日"
-const char* CRON_SCHEDULE = "0 9 * * *";  // 毎日9:00 UTC
+// 実行スケジュール
+// Cron式: "分 時 日 月 曜日"  または  秒間隔: "整数"
+const char* SCHEDULE = "0 9 * * *";  // 毎日9:00 UTC
+// const char* SCHEDULE = "*/5 * * * *";  // 5分ごと（テスト用）
+// const char* SCHEDULE = "10";  // 10秒ごと（テスト用）
 
 // サーボ設定
 const int SERVO_PIN = A1;           // サーボ接続ピン
@@ -85,13 +98,13 @@ void setup() {
   
   // スケジューラ初期化
   if (DEBUG_MODE) {
-    Serial.println(F("\nInitializing Cron Scheduler..."));
+    Serial.println(F("\nInitializing Scheduler..."));
   }
   
-  if (!scheduler.init(UPLOAD_DATETIME, CRON_SCHEDULE)) {
+  if (!scheduler.init(UPLOAD_DATETIME, SCHEDULE)) {
     if (DEBUG_MODE) {
       Serial.println(F("\n*** ERROR: Scheduler initialization failed ***"));
-      Serial.println(F("Please check UPLOAD_DATETIME and CRON_SCHEDULE"));
+      Serial.println(F("Please check UPLOAD_DATETIME and SCHEDULE"));
     }
     while (1);  // エラーで停止
   }
@@ -128,8 +141,14 @@ void loop() {
  * スケジュール判定
  * 
  * CronSchedulerを使用して実行タイミングを判定
+ * 
+ * Cronモード:
  * - 初回: 次のCron一致時刻
  * - 以降: 24時間ごと
+ * 
+ * 秒間隔モード:
+ * - 起動直後に実行
+ * - 以降: 指定秒数ごと
  * 
  * @return true: 実行タイミング, false: 待機
  */
