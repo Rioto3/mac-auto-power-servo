@@ -1,52 +1,59 @@
 /*
- * Mac Auto Power Servo - Daily Power On
+ * Mac Auto Power Servo - Daily Power On (Cron Version)
  * 
- * 24時間ごとにMacBookの電源ボタンを押すプログラム
+ * Cron式でスケジュール管理するMacBook電源自動ON装置
  * 
  * 接続:
  * - サーボ信号線: A1ピン
  * - サーボVCC: 5V
  * - サーボGND: GND
  * 
- * 動作:
- * - 起動直後に1回実行（テスト用）
- * - 以降24時間ごとに実行
+ * 使い方:
+ * 1. UPLOAD_DATETIME に書き込み時のUTC日時を設定
+ * 2. CRON_SCHEDULE に実行スケジュールをCron式で設定
+ * 3. Arduino にアップロード
  * 
- * TODO: RTC（DS3231等）追加時にCron式対応予定
- *       例: "0 9 * * *" で毎日9:00に実行
+ * Cron式フォーマット: "分 時 日 月 曜日"
+ * 例:
+ *   "0 9 * * *"    → 毎日9:00 UTC
+ *   "30 14 * * *"  → 毎日14:30 UTC
+ *   "0 6 1 * *"    → 毎月1日6:00 UTC
+ *   "0 0 * * 1"    → 毎週月曜0:00 UTC
  */
 
 #include <Servo.h>
+#include "CronScheduler.h"
 
 // ========================================
-// 設定エリア
+// ユーザー設定エリア
 // ========================================
 
-// ピン設定
-const int SERVO_PIN = A1;           // サーボ接続ピン（A1 = デジタル15番相当）
+// プログラム書き込み時のUTC日時
+// フォーマット: "YYYY-MM-DD HH:MM:SS"
+const char* UPLOAD_DATETIME = "2025-12-31 15:30:00";
 
-// サーボ角度設定
+// 実行スケジュール (Cron式)
+// フォーマット: "分 時 日 月 曜日"
+const char* CRON_SCHEDULE = "0 9 * * *";  // 毎日9:00 UTC
+
+// サーボ設定
+const int SERVO_PIN = A1;           // サーボ接続ピン
 const int POS_REST = 0;             // 待機位置（度）
 const int POS_PRESS = 90;           // 押下位置（度）
-
-// 動作時間設定
 const int PRESS_DURATION = 500;     // ボタン押下時間（ミリ秒）
 const int RETURN_DURATION = 500;    // 待機位置に戻る際の待機時間（ミリ秒）
 
-// スケジュール設定
-const unsigned long INTERVAL_24H = 24UL * 60UL * 60UL * 1000UL;  // 24時間（ミリ秒）
-// const unsigned long INTERVAL_24H = 60000UL;  // テスト用: 1分ごと
-
 // デバッグ設定
 const bool DEBUG_MODE = true;       // シリアル出力の有効/無効
+const int STATUS_INTERVAL = 10000;  // ステータス表示間隔（ミリ秒）
 
 // ========================================
 // グローバル変数
 // ========================================
 
 Servo powerButtonServo;
-unsigned long lastExecutionTime = 0;
-bool firstRun = true;
+CronScheduler scheduler;
+unsigned long lastStatusTime = 0;
 
 // ========================================
 // セットアップ
@@ -56,11 +63,11 @@ void setup() {
   // シリアル通信初期化
   if (DEBUG_MODE) {
     Serial.begin(9600);
-    Serial.println(F("=== Mac Auto Power Servo - Daily Power On ==="));
-    Serial.println(F("Time base: UTC"));
-    Serial.println(F("Interval: 24 hours"));
-    Serial.print(F("Servo pin: A"));
-    Serial.println(SERVO_PIN - A0);
+    while (!Serial && millis() < 3000);  // シリアル接続待機（最大3秒）
+    
+    Serial.println(F("\n\n"));
+    Serial.println(F("========================================"));
+    Serial.println(F("  Mac Auto Power Servo - Cron Version"));
     Serial.println(F("========================================"));
   }
   
@@ -69,11 +76,31 @@ void setup() {
   powerButtonServo.write(POS_REST);
   
   if (DEBUG_MODE) {
-    Serial.println(F("Servo initialized at REST position"));
-    Serial.println(F("First execution will happen immediately..."));
+    Serial.print(F("Servo initialized at pin A"));
+    Serial.println(SERVO_PIN - A0);
+    Serial.println(F("Position: REST"));
   }
   
   delay(1000);  // サーボ安定化待ち
+  
+  // スケジューラ初期化
+  if (DEBUG_MODE) {
+    Serial.println(F("\nInitializing Cron Scheduler..."));
+  }
+  
+  if (!scheduler.init(UPLOAD_DATETIME, CRON_SCHEDULE)) {
+    if (DEBUG_MODE) {
+      Serial.println(F("\n*** ERROR: Scheduler initialization failed ***"));
+      Serial.println(F("Please check UPLOAD_DATETIME and CRON_SCHEDULE"));
+    }
+    while (1);  // エラーで停止
+  }
+  
+  // デバッグ情報表示
+  if (DEBUG_MODE) {
+    scheduler.printDebugInfo();
+    Serial.println(F("System ready. Waiting for scheduled time...\n"));
+  }
 }
 
 // ========================================
@@ -81,13 +108,13 @@ void setup() {
 // ========================================
 
 void loop() {
+  // スケジュール判定
   if (scheduleManager()) {
     servoExecute();
   }
   
-  // 定期的にステータス表示（10秒ごと）
-  static unsigned long lastStatusTime = 0;
-  if (DEBUG_MODE && millis() - lastStatusTime >= 10000) {
+  // 定期ステータス表示
+  if (DEBUG_MODE && millis() - lastStatusTime >= STATUS_INTERVAL) {
     printStatus();
     lastStatusTime = millis();
   }
@@ -100,54 +127,14 @@ void loop() {
 /*
  * スケジュール判定
  * 
- * 現在の実装: 24時間間隔での実行
- * 
- * TODO: RTC追加時の実装例
- * ----------------------------------------
- * #include <RTClib.h>
- * RTC_DS3231 rtc;
- * 
- * bool scheduleManager() {
- *   DateTime now = rtc.now();
- *   
- *   // Cron式: "0 9 * * *" の例（毎日9:00 UTC）
- *   if (now.hour() == 9 && now.minute() == 0 && now.second() < 2) {
- *     // 2秒以内なら実行（重複実行を防ぐ）
- *     unsigned long currentTime = millis();
- *     if (currentTime - lastExecutionTime >= 60000) {  // 1分以上経過
- *       lastExecutionTime = currentTime;
- *       return true;
- *     }
- *   }
- *   return false;
- * }
- * ----------------------------------------
+ * CronSchedulerを使用して実行タイミングを判定
+ * - 初回: 次のCron一致時刻
+ * - 以降: 24時間ごと
  * 
  * @return true: 実行タイミング, false: 待機
  */
 bool scheduleManager() {
-  unsigned long currentTime = millis();
-  
-  // 初回実行（起動直後）
-  if (firstRun) {
-    firstRun = false;
-    lastExecutionTime = currentTime;
-    if (DEBUG_MODE) {
-      Serial.println(F("\n[SCHEDULE] First run - executing now"));
-    }
-    return true;
-  }
-  
-  // 24時間経過チェック
-  if (currentTime - lastExecutionTime >= INTERVAL_24H) {
-    lastExecutionTime = currentTime;
-    if (DEBUG_MODE) {
-      Serial.println(F("\n[SCHEDULE] 24 hours elapsed - executing now"));
-    }
-    return true;
-  }
-  
-  return false;
+  return scheduler.shouldExecute(millis());
 }
 
 // ========================================
@@ -164,11 +151,10 @@ bool scheduleManager() {
  */
 void servoExecute() {
   if (DEBUG_MODE) {
-    Serial.println(F("========================================"));
+    Serial.println(F("\n========================================"));
     Serial.println(F("[SERVO] Execution started"));
     Serial.print(F("[SERVO] Uptime: "));
-    Serial.print(millis() / 1000);
-    Serial.println(F(" seconds"));
+    printUptime();
   }
   
   // ステップ1: ボタンを押す
@@ -201,20 +187,30 @@ void servoExecute() {
 
 /*
  * 現在のステータスを表示
- * 次回実行までの残り時間などを出力
+ * 次回実行までの残り時間を出力
  */
 void printStatus() {
-  unsigned long currentTime = millis();
-  unsigned long elapsed = currentTime - lastExecutionTime;
-  unsigned long remaining = INTERVAL_24H - elapsed;
+  char buffer[32];
+  scheduler.getNextExecutionTime(buffer, sizeof(buffer));
   
   Serial.print(F("[STATUS] Next execution in: "));
+  Serial.println(buffer);
+}
+
+/*
+ * 起動時間を表示
+ */
+void printUptime() {
+  unsigned long totalSeconds = millis() / 1000;
+  unsigned long days = totalSeconds / 86400;
+  unsigned long hours = (totalSeconds % 86400) / 3600;
+  unsigned long minutes = (totalSeconds % 3600) / 60;
+  unsigned long seconds = totalSeconds % 60;
   
-  // 時間を hh:mm:ss 形式で表示
-  unsigned long remainingSec = remaining / 1000;
-  unsigned long hours = remainingSec / 3600;
-  unsigned long minutes = (remainingSec % 3600) / 60;
-  unsigned long seconds = remainingSec % 60;
+  if (days > 0) {
+    Serial.print(days);
+    Serial.print(F("d "));
+  }
   
   if (hours < 10) Serial.print(F("0"));
   Serial.print(hours);
