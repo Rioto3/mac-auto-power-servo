@@ -135,7 +135,7 @@ bool CronScheduler::parseCronField(const char* fieldStr, CronField& field, int m
   // ステップ値チェック（*/n 形式）
   if (fieldStr[0] == '*' && fieldStr[1] == '/') {
     field.isStep = true;
-    field.value = atoi(fieldStr + 2);  // "*/5" → 5
+    field.value = atoi(fieldStr + 2);  // "*/5" : 5
     
     if (field.value <= 0 || field.value > maxVal) {
       return false;
