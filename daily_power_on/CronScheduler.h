@@ -51,11 +51,14 @@ class CronScheduler {
 public:
   CronScheduler();
   
-  // Initialize: set current datetime and schedule
-  bool init(const char* currentDateTime, const char* schedule);
+  // Initialize RTC and schedule
+  bool init(const char* schedule);
   
-  // Get milliseconds until next execution
-  unsigned long getNextExecutionDelay();
+  // Setup RTC time from serial input
+  bool setupRTCTime();
+  
+  // Check if RTC needs time setup
+  bool needsTimeSetup();
   
   // Check if should execute now
   bool shouldExecute(unsigned long currentMillis);
@@ -75,6 +78,7 @@ private:
   unsigned long _lastCheckMillis;
   bool _initialized;
   bool _rtcAvailable;
+  bool _timeIsSet;
   
   // Initialize schedule string
   bool initializeSchedule(const char* schedule);
@@ -90,9 +94,6 @@ private:
   
   // Parse datetime string "YYYY-MM-DD HH:MM:SS"
   bool parseDateTime(const char* dateTimeStr, DateTime& dt);
-  
-  // Calculate next execution time (Cron mode)
-  void calculateNextExecutionCron();
   
   // Check if DateTime matches Cron expression
   bool matchesCron(const DateTime& dt);

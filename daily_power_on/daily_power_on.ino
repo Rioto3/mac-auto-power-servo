@@ -10,10 +10,11 @@
  * - RTC SDA: A4
  * - RTC SCL: A5
  * 
- * Setup:
- * 1. Set CURRENT_DATETIME to current UTC time
- * 2. Set SCHEDULE (Cron expression or interval)
- * 3. Upload to Arduino
+ * Setup (First Time Only):
+ * 1. Upload this sketch to Arduino
+ * 2. Open Serial Monitor (9600 baud)
+ * 3. Enter current UTC time when prompted
+ * 4. Done! RTC will keep time even after power off
  * 
  * Schedule Format:
  * 
@@ -40,10 +41,6 @@
 // ========================================
 // User Configuration
 // ========================================
-
-// Current UTC datetime (set this when uploading)
-// Format: "YYYY-MM-DD HH:MM:SS"
-const char* CURRENT_DATETIME = "2026-01-02 10:30:00";
 
 // Execution schedule
 // Cron: "minute hour day month weekday"  OR  Interval: "seconds"
@@ -103,15 +100,24 @@ void setup() {
     Serial.println(F("\nInitializing RTC Scheduler..."));
   }
   
-  if (!scheduler.init(CURRENT_DATETIME, SCHEDULE)) {
+  if (!scheduler.init(SCHEDULE)) {
     if (DEBUG_MODE) {
       Serial.println(F("\n*** ERROR: Scheduler initialization failed ***"));
-      Serial.println(F("Please check:"));
-      Serial.println(F("- DS3231 RTC connection (SDA->A4, SCL->A5)"));
-      Serial.println(F("- CURRENT_DATETIME format"));
-      Serial.println(F("- SCHEDULE format"));
     }
     while (1);  // Stop on error
+  }
+  
+  // Check if RTC needs time setup
+  if (scheduler.needsTimeSetup()) {
+    Serial.println(F("\n*** RTC TIME SETUP REQUIRED ***"));
+    
+    // Wait for time setup via serial
+    while (!scheduler.setupRTCTime()) {
+      Serial.println(F("\n[SYSTEM] Please try again..."));
+      delay(2000);
+    }
+    
+    Serial.println(F("[SYSTEM] Setup complete!"));
   }
   
   // Debug info

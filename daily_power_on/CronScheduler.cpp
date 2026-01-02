@@ -8,44 +8,39 @@
 
 CronScheduler::CronScheduler() 
   : _mode(MODE_CRON), _nextExecutionMillis(0), _lastCheckMillis(0),
-    _intervalSeconds(0), _initialized(false), _rtcAvailable(false) {
+    _intervalSeconds(0), _initialized(false), _rtcAvailable(false), _timeIsSet(false) {
   memset(&_cron, 0, sizeof(CronExpression));
 }
 
-bool CronScheduler::init(const char* currentDateTime, const char* schedule) {
+bool CronScheduler::init(const char* schedule) {
   // Initialize RTC
   if (!_rtc.begin()) {
     Serial.println(F("[CRON] ERROR: Could not find RTC"));
+    Serial.println(F("[CRON] Please check DS3231 connection:"));
+    Serial.println(F("[CRON]   SDA -> A4"));
+    Serial.println(F("[CRON]   SCL -> A5"));
+    Serial.println(F("[CRON]   VCC -> 5V"));
+    Serial.println(F("[CRON]   GND -> GND"));
     return false;
   }
   
   _rtcAvailable = true;
   
-  // Parse and set current datetime to RTC
-  DateTime dt;
-  if (!parseDateTime(currentDateTime, dt)) {
-    Serial.println(F("[CRON] ERROR: Failed to parse current datetime"));
-    return false;
+  // Check if RTC has valid time
+  DateTime now = _rtc.now();
+  if (now.year() < 2020) {
+    // RTC time is invalid or not set
+    _timeIsSet = false;
+    Serial.println(F("[CRON] RTC time not set or invalid"));
+  } else {
+    _timeIsSet = true;
+    Serial.println(F("[CRON] RTC time is valid"));
   }
-  
-  // Set RTC time
-  _rtc.adjust(dt);
-  Serial.print(F("[CRON] RTC time set to: "));
-  Serial.print(dt.year());
-  Serial.print(F("-"));
-  Serial.print(dt.month());
-  Serial.print(F("-"));
-  Serial.print(dt.day());
-  Serial.print(F(" "));
-  Serial.print(dt.hour());
-  Serial.print(F(":"));
-  Serial.print(dt.minute());
-  Serial.print(F(":"));
-  Serial.println(dt.second());
   
   // Check if RTC lost power
   if (_rtc.lostPower()) {
-    Serial.println(F("[CRON] WARNING: RTC lost power, time was reset"));
+    Serial.println(F("[CRON] WARNING: RTC lost power, time needs to be reset"));
+    _timeIsSet = false;
   }
   
   // Parse schedule
@@ -58,6 +53,82 @@ bool CronScheduler::init(const char* currentDateTime, const char* schedule) {
   _initialized = true;
   
   return true;
+}
+
+bool CronScheduler::needsTimeSetup() {
+  return _rtcAvailable && !_timeIsSet;
+}
+
+bool CronScheduler::setupRTCTime() {
+  if (!_rtcAvailable) {
+    Serial.println(F("[CRON] ERROR: RTC not available"));
+    return false;
+  }
+  
+  Serial.println(F("\n========================================"));
+  Serial.println(F("[CRON] RTC Time Setup"));
+  Serial.println(F("========================================"));
+  Serial.println(F("Enter current UTC time in format:"));
+  Serial.println(F("YYYY-MM-DD HH:MM:SS"));
+  Serial.println(F("Example: 2026-01-02 10:30:00"));
+  Serial.println(F("========================================"));
+  Serial.print(F("> "));
+  
+  // Wait for serial input (max 60 seconds)
+  unsigned long startTime = millis();
+  String input = "";
+  
+  while (millis() - startTime < 60000) {
+    if (Serial.available() > 0) {
+      char c = Serial.read();
+      
+      if (c == '\n' || c == '\r') {
+        if (input.length() > 0) {
+          Serial.println();  // New line after input
+          
+          // Parse and set time
+          DateTime dt;
+          if (parseDateTime(input.c_str(), dt)) {
+            _rtc.adjust(dt);
+            _timeIsSet = true;
+            
+            Serial.println(F("[CRON] RTC time successfully set to:"));
+            Serial.print(F("[CRON]   "));
+            Serial.print(dt.year());
+            Serial.print(F("-"));
+            if (dt.month() < 10) Serial.print(F("0"));
+            Serial.print(dt.month());
+            Serial.print(F("-"));
+            if (dt.day() < 10) Serial.print(F("0"));
+            Serial.print(dt.day());
+            Serial.print(F(" "));
+            if (dt.hour() < 10) Serial.print(F("0"));
+            Serial.print(dt.hour());
+            Serial.print(F(":"));
+            if (dt.minute() < 10) Serial.print(F("0"));
+            Serial.print(dt.minute());
+            Serial.print(F(":"));
+            if (dt.second() < 10) Serial.print(F("0"));
+            Serial.print(dt.second());
+            Serial.println(F(" UTC"));
+            Serial.println(F("========================================\n"));
+            
+            return true;
+          } else {
+            Serial.println(F("[CRON] ERROR: Invalid format"));
+            Serial.println(F("[CRON] Please use: YYYY-MM-DD HH:MM:SS"));
+            return false;
+          }
+        }
+      } else {
+        input += c;
+        Serial.print(c);  // Echo input
+      }
+    }
+  }
+  
+  Serial.println(F("\n[CRON] ERROR: Timeout waiting for input"));
+  return false;
 }
 
 bool CronScheduler::initializeSchedule(const char* schedule) {
@@ -111,6 +182,14 @@ bool CronScheduler::parseDateTime(const char* dateTimeStr, DateTime& dt) {
   if (parsed != 6) {
     return false;
   }
+  
+  // Validate ranges
+  if (year < 2020 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  if (hour < 0 || hour > 23) return false;
+  if (minute < 0 || minute > 59) return false;
+  if (second < 0 || second > 59) return false;
   
   dt = DateTime(year, month, day, hour, minute, second);
   
@@ -197,7 +276,7 @@ bool CronScheduler::matchesCronField(const CronField& field, int value) {
 }
 
 bool CronScheduler::shouldExecute(unsigned long currentMillis) {
-  if (!_initialized || !_rtcAvailable) return false;
+  if (!_initialized || !_rtcAvailable || !_timeIsSet) return false;
   
   if (_mode == MODE_INTERVAL) {
     // Interval mode
@@ -224,30 +303,25 @@ bool CronScheduler::shouldExecute(unsigned long currentMillis) {
   return false;
 }
 
-unsigned long CronScheduler::getNextExecutionDelay() {
-  if (!_initialized) return 0;
-  
-  if (_mode == MODE_INTERVAL) {
-    unsigned long currentMillis = millis();
-    if (currentMillis >= _nextExecutionMillis) {
-      return 0;
-    }
-    return _nextExecutionMillis - currentMillis;
-  }
-  
-  // Cron mode: estimate time until next match
-  // This is approximate - just for display purposes
-  return 60000;  // Show "checking every minute"
-}
-
 void CronScheduler::getNextExecutionTime(char* buffer, size_t bufferSize) {
   if (!_initialized) {
     snprintf(buffer, bufferSize, "Not initialized");
     return;
   }
   
+  if (!_timeIsSet) {
+    snprintf(buffer, bufferSize, "Time not set");
+    return;
+  }
+  
   if (_mode == MODE_INTERVAL) {
-    unsigned long delayMs = getNextExecutionDelay();
+    unsigned long currentMillis = millis();
+    unsigned long delayMs = 0;
+    
+    if (currentMillis < _nextExecutionMillis) {
+      delayMs = _nextExecutionMillis - currentMillis;
+    }
+    
     unsigned long delaySec = delayMs / 1000;
     
     unsigned long days = delaySec / 86400;
@@ -285,7 +359,10 @@ void CronScheduler::printDebugInfo() {
   Serial.print(F("RTC Available: "));
   Serial.println(_rtcAvailable ? F("Yes") : F("No"));
   
-  if (_rtcAvailable) {
+  Serial.print(F("Time Is Set: "));
+  Serial.println(_timeIsSet ? F("Yes") : F("No"));
+  
+  if (_rtcAvailable && _timeIsSet) {
     DateTime now = _rtc.now();
     Serial.print(F("Current RTC Time: "));
     Serial.print(now.year());
@@ -303,7 +380,8 @@ void CronScheduler::printDebugInfo() {
     Serial.print(now.minute());
     Serial.print(F(":"));
     if (now.second() < 10) Serial.print(F("0"));
-    Serial.println(now.second());
+    Serial.print(now.second());
+    Serial.println(F(" UTC"));
     
     Serial.print(F("Day of Week: "));
     const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
