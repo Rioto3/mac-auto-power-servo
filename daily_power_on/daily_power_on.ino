@@ -1,39 +1,39 @@
-/*
- * Mac Auto Power Servo - Daily Power On (RTC + Cron Version)
- * 
- * RTC-based Cron scheduler for MacBook auto power-on
- * 
- * Hardware:
- * - Servo signal: A1 pin
- * - Servo VCC: 5V
- * - Servo GND: GND
- * - RTC SDA: A4
- * - RTC SCL: A5
- * 
- * Setup (First Time Only):
- * 1. Upload this sketch to Arduino
- * 2. Open Serial Monitor (9600 baud)
- * 3. Enter current UTC time when prompted
- * 4. Done! RTC will keep time even after power off
- * 
- * Schedule Format:
- * 
- * A) Cron Expression (absolute time)
- *    Format: "minute hour day month weekday"
- *    Examples:
- *      "0 9 * * *"     -> Daily at 9:00 UTC
- *      "30 14 * * *"   -> Daily at 14:30 UTC
- *      "*/5 * * * *"   -> Every 5 minutes
- *      "0 */2 * * *"   -> Every 2 hours
- *      "0 6 1 * *"     -> 1st of month at 6:00 UTC
- *      "0 0 * * 1"     -> Every Monday at 0:00 UTC
- * 
- * B) Interval (seconds)
- *    Examples:
- *      "60"    -> Every 60 seconds
- *      "300"   -> Every 300 seconds (5 minutes)
- *      "10"    -> Every 10 seconds (for testing)
- */
+//
+// Mac Auto Power Servo - Daily Power On (RTC + Cron Version)
+// 
+// RTC-based Cron scheduler for MacBook auto power-on
+// 
+// Hardware:
+// - Servo signal: A1 pin
+// - Servo VCC: 5V
+// - Servo GND: GND
+// - RTC SDA: A4
+// - RTC SCL: A5
+// 
+// Setup (First Time Only):
+// 1. Upload this sketch to Arduino
+// 2. Open Serial Monitor (9600 baud)
+// 3. Enter current UTC time when prompted
+// 4. Done! RTC will keep time even after power off
+// 
+// Schedule Format:
+// 
+// A) Cron Expression (absolute time)
+//    Format: "minute hour day month weekday"
+//    Examples:
+//      "0 9 * * *"     -> Daily at 9:00 UTC
+//      "30 14 * * *"   -> Daily at 14:30 UTC
+//      "*/5 * * * *"   -> Every 5 minutes
+//      "0 */2 * * *"   -> Every 2 hours
+//      "0 6 1 * *"     -> 1st of month at 6:00 UTC
+//      "0 0 * * 1"     -> Every Monday at 0:00 UTC
+// 
+// B) Interval (seconds)
+//    Examples:
+//      "60"    -> Every 60 seconds
+//      "300"   -> Every 300 seconds (5 minutes)
+//      "10"    -> Every 10 seconds (for testing)
+//
 
 #include <Servo.h>
 #include "CronScheduler.h"
@@ -148,21 +148,21 @@ void loop() {
 // Schedule Manager
 // ========================================
 
-/*
- * Schedule check
- * 
- * Uses CronScheduler with RTC
- * 
- * Cron mode:
- * - Checks RTC time every second
- * - Executes when Cron expression matches
- * 
- * Interval mode:
- * - Executes immediately on first run
- * - Then executes every N seconds
- * 
- * @return true: execute now, false: wait
- */
+//
+// Schedule check
+// 
+// Uses CronScheduler with RTC
+// 
+// Cron mode:
+// - Checks RTC time every second
+// - Executes when Cron expression matches
+// 
+// Interval mode:
+// - Executes immediately on first run
+// - Then executes every N seconds
+// 
+// @return true: execute now, false: wait
+//
 bool scheduleManager() {
   return scheduler.shouldExecute(millis());
 }
@@ -171,14 +171,14 @@ bool scheduleManager() {
 // Servo Execution
 // ========================================
 
-/*
- * Servo motor execution
- * 
- * Sequence:
- * 1. Rest -> Press position (push button)
- * 2. Wait for press duration
- * 3. Press -> Rest position (return)
- */
+//
+// Servo motor execution
+// 
+// Sequence:
+// 1. Rest -> Press position (push button)
+// 2. Wait for press duration
+// 3. Press -> Rest position (return)
+//
 void servoExecute() {
   if (DEBUG_MODE) {
     Serial.println(F("\n========================================"));
@@ -215,9 +215,9 @@ void servoExecute() {
 // Status Display
 // ========================================
 
-/*
- * Display current status
- */
+//
+// Display current status
+//
 void printStatus() {
   char buffer[32];
   scheduler.getNextExecutionTime(buffer, sizeof(buffer));
@@ -226,9 +226,9 @@ void printStatus() {
   Serial.println(buffer);
 }
 
-/*
- * Display uptime
- */
+//
+// Display uptime
+//
 void printUptime() {
   unsigned long totalSeconds = millis() / 1000;
   unsigned long days = totalSeconds / 86400;

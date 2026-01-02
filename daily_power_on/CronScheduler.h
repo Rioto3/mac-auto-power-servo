@@ -1,24 +1,24 @@
-/*
- * CronScheduler.h
- * 
- * Arduino RTC-based Cron Scheduler Library
- * Uses DS3231 RTC for absolute time-based scheduling
- * 
- * Supported Schedule Formats:
- * 
- * 1. Cron Expression: "minute hour day month weekday"
- *    Examples:
- *      "0 9 * * *"     -> Daily at 9:00
- *      "30 14 * * 1"   -> Every Monday at 14:30
- *      "*/5 * * * *"   -> Every 5 minutes
- *      "0 */2 * * *"   -> Every 2 hours
- * 
- * 2. Interval (seconds): "integer"
- *    Examples:
- *      "60"    -> Every 60 seconds
- *      "300"   -> Every 300 seconds (5 minutes)
- *      "10"    -> Every 10 seconds (for testing)
- */
+//
+// CronScheduler.h
+// 
+// Arduino RTC-based Cron Scheduler Library
+// Uses DS3231 RTC for absolute time-based scheduling
+// 
+// Supported Schedule Formats:
+// 
+// 1. Cron Expression: "minute hour day month weekday"
+//    Examples:
+//      "0 9 * * *"     -> Daily at 9:00
+//      "30 14 * * 1"   -> Every Monday at 14:30
+//      "*/5 * * * *"   -> Every 5 minutes
+//      "0 */2 * * *"   -> Every 2 hours
+// 
+// 2. Interval (seconds): "integer"
+//    Examples:
+//      "60"    -> Every 60 seconds
+//      "300"   -> Every 300 seconds (5 minutes)
+//      "10"    -> Every 10 seconds (for testing)
+//
 
 #ifndef CRON_SCHEDULER_H
 #define CRON_SCHEDULER_H

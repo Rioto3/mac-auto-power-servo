@@ -1,8 +1,8 @@
-/*
- * CronScheduler.cpp
- * 
- * Cron Scheduler Implementation with RTC support
- */
+//
+// CronScheduler.cpp
+// 
+// Cron Scheduler Implementation with RTC support
+//
 
 #include "CronScheduler.h"
 
