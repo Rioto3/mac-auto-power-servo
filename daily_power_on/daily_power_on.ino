@@ -1,67 +1,69 @@
 /*
- * Mac Auto Power Servo - Daily Power On (Cron Version)
+ * Mac Auto Power Servo - Daily Power On (RTC + Cron Version)
  * 
- * Cron式または秒間隔でスケジュール管理するMacBook電源自動ON装置
+ * RTC-based Cron scheduler for MacBook auto power-on
  * 
- * 接続:
- * - サーボ信号線: A1ピン
- * - サーボVCC: 5V
- * - サーボGND: GND
+ * Hardware:
+ * - Servo signal: A1 pin
+ * - Servo VCC: 5V
+ * - Servo GND: GND
+ * - RTC SDA: A4
+ * - RTC SCL: A5
  * 
- * 使い方:
- * 1. UPLOAD_DATETIME に書き込み時のUTC日時を設定
- * 2. SCHEDULE に実行スケジュールを設定
- * 3. Arduino にアップロード
+ * Setup:
+ * 1. Set CURRENT_DATETIME to current UTC time
+ * 2. Set SCHEDULE (Cron expression or interval)
+ * 3. Upload to Arduino
  * 
- * スケジュール設定方法:
+ * Schedule Format:
  * 
- * A) Cron式（分単位）
- *    フォーマット: "分 時 日 月 曜日"
- *    例:
- *      "0 9 * * *"     : 毎日9:00 UTC
- *      "30 14 * * *"   : 毎日14:30 UTC
- *      "*/5 * * * *"   : 5分ごと
- *      "0 */2 * * *"   : 2時間ごと
- *      "0 6 1 * *"     : 毎月1日6:00 UTC
- *      "0 0 * * 1"     : 毎週月曜0:00 UTC
+ * A) Cron Expression (absolute time)
+ *    Format: "minute hour day month weekday"
+ *    Examples:
+ *      "0 9 * * *"     -> Daily at 9:00 UTC
+ *      "30 14 * * *"   -> Daily at 14:30 UTC
+ *      "*/5 * * * *"   -> Every 5 minutes
+ *      "0 */2 * * *"   -> Every 2 hours
+ *      "0 6 1 * *"     -> 1st of month at 6:00 UTC
+ *      "0 0 * * 1"     -> Every Monday at 0:00 UTC
  * 
- * B) 秒間隔（整数のみ）
- *    例:
- *      "60"    : 60秒ごと
- *      "300"   : 300秒（5分）ごと
- *      "10"    : 10秒ごと（テスト用）
+ * B) Interval (seconds)
+ *    Examples:
+ *      "60"    -> Every 60 seconds
+ *      "300"   -> Every 300 seconds (5 minutes)
+ *      "10"    -> Every 10 seconds (for testing)
  */
 
 #include <Servo.h>
 #include "CronScheduler.h"
 
 // ========================================
-// ユーザー設定エリア
+// User Configuration
 // ========================================
 
-// プログラム書き込み時のUTC日時
-// フォーマット: "YYYY-MM-DD HH:MM:SS"
-const char* UPLOAD_DATETIME = "2025-12-31 15:30:00";
+// Current UTC datetime (set this when uploading)
+// Format: "YYYY-MM-DD HH:MM:SS"
+const char* CURRENT_DATETIME = "2026-01-02 10:30:00";
 
-// 実行スケジュール
-// Cron式: "分 時 日 月 曜日"  または  秒間隔: "整数"
-const char* SCHEDULE = "0 9 * * *";  // 毎日9:00 UTC
-// const char* SCHEDULE = "*/5 * * * *";  // 5分ごと（テスト用）
-// const char* SCHEDULE = "10";  // 10秒ごと（テスト用）
+// Execution schedule
+// Cron: "minute hour day month weekday"  OR  Interval: "seconds"
+const char* SCHEDULE = "0 9 * * *";  // Daily at 9:00 UTC
+// const char* SCHEDULE = "*/5 * * * *";  // Every 5 minutes (testing)
+// const char* SCHEDULE = "10";  // Every 10 seconds (testing)
 
-// サーボ設定
-const int SERVO_PIN = A1;           // サーボ接続ピン
-const int POS_REST = 0;             // 待機位置（度）
-const int POS_PRESS = 90;           // 押下位置（度）
-const int PRESS_DURATION = 500;     // ボタン押下時間（ミリ秒）
-const int RETURN_DURATION = 500;    // 待機位置に戻る際の待機時間（ミリ秒）
+// Servo settings
+const int SERVO_PIN = A1;           // Servo pin
+const int POS_REST = 0;             // Rest position (degrees)
+const int POS_PRESS = 90;           // Press position (degrees)
+const int PRESS_DURATION = 500;     // Button press time (ms)
+const int RETURN_DURATION = 500;    // Return wait time (ms)
 
-// デバッグ設定
-const bool DEBUG_MODE = true;       // シリアル出力の有効/無効
-const int STATUS_INTERVAL = 10000;  // ステータス表示間隔（ミリ秒）
+// Debug settings
+const bool DEBUG_MODE = true;       // Serial output enable/disable
+const int STATUS_INTERVAL = 10000;  // Status display interval (ms)
 
 // ========================================
-// グローバル変数
+// Global Variables
 // ========================================
 
 Servo powerButtonServo;
@@ -69,22 +71,22 @@ CronScheduler scheduler;
 unsigned long lastStatusTime = 0;
 
 // ========================================
-// セットアップ
+// Setup
 // ========================================
 
 void setup() {
-  // シリアル通信初期化
+  // Serial init
   if (DEBUG_MODE) {
     Serial.begin(9600);
-    while (!Serial && millis() < 3000);  // シリアル接続待機（最大3秒）
+    while (!Serial && millis() < 3000);  // Wait for serial (max 3s)
     
     Serial.println(F("\n\n"));
     Serial.println(F("========================================"));
-    Serial.println(F("  Mac Auto Power Servo - Cron Version"));
+    Serial.println(F("  Mac Auto Power Servo - RTC Version"));
     Serial.println(F("========================================"));
   }
   
-  // サーボ初期化
+  // Servo init
   powerButtonServo.attach(SERVO_PIN);
   powerButtonServo.write(POS_REST);
   
@@ -94,39 +96,42 @@ void setup() {
     Serial.println(F("Position: REST"));
   }
   
-  delay(1000);  // サーボ安定化待ち
+  delay(1000);  // Servo stabilization
   
-  // スケジューラ初期化
+  // Scheduler init
   if (DEBUG_MODE) {
-    Serial.println(F("\nInitializing Scheduler..."));
+    Serial.println(F("\nInitializing RTC Scheduler..."));
   }
   
-  if (!scheduler.init(UPLOAD_DATETIME, SCHEDULE)) {
+  if (!scheduler.init(CURRENT_DATETIME, SCHEDULE)) {
     if (DEBUG_MODE) {
       Serial.println(F("\n*** ERROR: Scheduler initialization failed ***"));
-      Serial.println(F("Please check UPLOAD_DATETIME and SCHEDULE"));
+      Serial.println(F("Please check:"));
+      Serial.println(F("- DS3231 RTC connection (SDA->A4, SCL->A5)"));
+      Serial.println(F("- CURRENT_DATETIME format"));
+      Serial.println(F("- SCHEDULE format"));
     }
-    while (1);  // エラーで停止
+    while (1);  // Stop on error
   }
   
-  // デバッグ情報表示
+  // Debug info
   if (DEBUG_MODE) {
     scheduler.printDebugInfo();
-    Serial.println(F("System ready. Waiting for scheduled time...\n"));
+    Serial.println(F("System ready. Monitoring schedule...\n"));
   }
 }
 
 // ========================================
-// メインループ
+// Main Loop
 // ========================================
 
 void loop() {
-  // スケジュール判定
+  // Schedule check
   if (scheduleManager()) {
     servoExecute();
   }
   
-  // 定期ステータス表示
+  // Status display
   if (DEBUG_MODE && millis() - lastStatusTime >= STATUS_INTERVAL) {
     printStatus();
     lastStatusTime = millis();
@@ -134,39 +139,39 @@ void loop() {
 }
 
 // ========================================
-// スケジュール管理
+// Schedule Manager
 // ========================================
 
 /*
- * スケジュール判定
+ * Schedule check
  * 
- * CronSchedulerを使用して実行タイミングを判定
+ * Uses CronScheduler with RTC
  * 
- * Cronモード:
- * - 初回: 次のCron一致時刻
- * - 以降: 24時間ごと
+ * Cron mode:
+ * - Checks RTC time every second
+ * - Executes when Cron expression matches
  * 
- * 秒間隔モード:
- * - 起動直後に実行
- * - 以降: 指定秒数ごと
+ * Interval mode:
+ * - Executes immediately on first run
+ * - Then executes every N seconds
  * 
- * @return true: 実行タイミング, false: 待機
+ * @return true: execute now, false: wait
  */
 bool scheduleManager() {
   return scheduler.shouldExecute(millis());
 }
 
 // ========================================
-// サーボ実行
+// Servo Execution
 // ========================================
 
 /*
- * サーボモーター動作実行
+ * Servo motor execution
  * 
- * 動作シーケンス:
- * 1. 待機位置 : 押下位置（ボタンを押す）
- * 2. 押下時間だけ待機
- * 3. 押下位置 : 待機位置（元に戻る）
+ * Sequence:
+ * 1. Rest -> Press position (push button)
+ * 2. Wait for press duration
+ * 3. Press -> Rest position (return)
  */
 void servoExecute() {
   if (DEBUG_MODE) {
@@ -176,20 +181,20 @@ void servoExecute() {
     printUptime();
   }
   
-  // ステップ1: ボタンを押す
+  // Step 1: Push button
   if (DEBUG_MODE) {
     Serial.print(F("[SERVO] Moving to PRESS position ("));
     Serial.print(POS_PRESS);
-    Serial.println(F("°)"));
+    Serial.println(F(" degrees)"));
   }
   powerButtonServo.write(POS_PRESS);
   delay(PRESS_DURATION);
   
-  // ステップ2: 元の位置に戻る
+  // Step 2: Return to rest
   if (DEBUG_MODE) {
     Serial.print(F("[SERVO] Moving to REST position ("));
     Serial.print(POS_REST);
-    Serial.println(F("°)"));
+    Serial.println(F(" degrees)"));
   }
   powerButtonServo.write(POS_REST);
   delay(RETURN_DURATION);
@@ -201,23 +206,22 @@ void servoExecute() {
 }
 
 // ========================================
-// ステータス表示
+// Status Display
 // ========================================
 
 /*
- * 現在のステータスを表示
- * 次回実行までの残り時間を出力
+ * Display current status
  */
 void printStatus() {
   char buffer[32];
   scheduler.getNextExecutionTime(buffer, sizeof(buffer));
   
-  Serial.print(F("[STATUS] Next execution in: "));
+  Serial.print(F("[STATUS] "));
   Serial.println(buffer);
 }
 
 /*
- * 起動時間を表示
+ * Display uptime
  */
 void printUptime() {
   unsigned long totalSeconds = millis() / 1000;

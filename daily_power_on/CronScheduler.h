@@ -1,33 +1,36 @@
 /*
  * CronScheduler.h
  * 
- * Arduino用の軽量Cronスケジューラライブラリ
- * RTCなしで書き込み時刻ベースのスケジューリングを実現
+ * Arduino RTC-based Cron Scheduler Library
+ * Uses DS3231 RTC for absolute time-based scheduling
  * 
- * 対応スケジュールフォーマット:
+ * Supported Schedule Formats:
  * 
- * 1. Cron式: "分 時 日 月 曜日"
- *    例: "0 9 * * *" : 毎日9:00
- *        "30 14 * * 1" : 毎週月曜14:30
- *        "*/5 * * * *" : 5分ごと
- *        "0 */2 * * *" : 2時間ごと
+ * 1. Cron Expression: "minute hour day month weekday"
+ *    Examples:
+ *      "0 9 * * *"     -> Daily at 9:00
+ *      "30 14 * * 1"   -> Every Monday at 14:30
+ *      "*/5 * * * *"   -> Every 5 minutes
+ *      "0 */2 * * *"   -> Every 2 hours
  * 
- * 2. 秒間隔: "整数"
- *    例: "60" : 60秒ごと
- *        "300" : 300秒（5分）ごと
- *        "10" : 10秒ごと（テスト用）
+ * 2. Interval (seconds): "integer"
+ *    Examples:
+ *      "60"    -> Every 60 seconds
+ *      "300"   -> Every 300 seconds (5 minutes)
+ *      "10"    -> Every 10 seconds (for testing)
  */
 
 #ifndef CRON_SCHEDULER_H
 #define CRON_SCHEDULER_H
 
 #include <Arduino.h>
+#include <RTClib.h>
 
-// Cron式の各フィールド
+// Cron field structure
 struct CronField {
-  bool isWildcard;     // * かどうか
-  bool isStep;         // */n かどうか
-  int value;           // 値 または ステップ値
+  bool isWildcard;     // Is it *?
+  bool isStep;         // Is it */n?
+  int value;           // Value or step value
 };
 
 struct CronExpression {
@@ -35,102 +38,70 @@ struct CronExpression {
   CronField hour;      // 0-23
   CronField day;       // 1-31
   CronField month;     // 1-12
-  CronField weekday;   // 0-6 (0=日曜)
+  CronField weekday;   // 0-6 (0=Sunday)
 };
 
-// 日時構造体
-struct DateTime {
-  int year;
-  int month;
-  int day;
-  int hour;
-  int minute;
-  int second;
-  int weekday;  // 0=日曜
-};
-
-// スケジュールモード
+// Schedule mode
 enum ScheduleMode {
-  MODE_CRON,      // Cron式モード
-  MODE_INTERVAL   // 秒間隔モード
+  MODE_CRON,      // Cron expression mode
+  MODE_INTERVAL   // Second interval mode
 };
 
 class CronScheduler {
 public:
   CronScheduler();
   
-  // 初期化: 書き込み日時とスケジュール文字列を設定
-  bool init(const char* uploadDateTime, const char* schedule);
+  // Initialize: set current datetime and schedule
+  bool init(const char* currentDateTime, const char* schedule);
   
-  // 次回実行までのミリ秒数を取得
+  // Get milliseconds until next execution
   unsigned long getNextExecutionDelay();
   
-  // スケジュールチェック（現在時刻がスケジュールに合致するか）
+  // Check if should execute now
   bool shouldExecute(unsigned long currentMillis);
   
-  // 次回実行予定時刻を文字列で取得（デバッグ用）
+  // Get next execution time as string (for debugging)
   void getNextExecutionTime(char* buffer, size_t bufferSize);
   
-  // デバッグ情報を出力
+  // Print debug information
   void printDebugInfo();
 
 private:
+  RTC_DS3231 _rtc;
   ScheduleMode _mode;
   CronExpression _cron;
-  DateTime _uploadTime;
-  unsigned long _intervalSeconds;     // 秒間隔モード用
+  unsigned long _intervalSeconds;     // For interval mode
   unsigned long _nextExecutionMillis;
-  unsigned long _uploadMillis;
+  unsigned long _lastCheckMillis;
   bool _initialized;
-  bool _firstExecutionDone;
+  bool _rtcAvailable;
   
-  // スケジュール文字列の判定と初期化
+  // Initialize schedule string
   bool initializeSchedule(const char* schedule);
   
-  // Cron式のパース
+  // Parse Cron expression
   bool parseCronExpression(const char* cronStr);
   
-  // Cronフィールドのパース（ステップ値対応）
+  // Parse Cron field (with step value support)
   bool parseCronField(const char* fieldStr, CronField& field, int minVal, int maxVal);
   
-  // 秒間隔のパース
+  // Parse interval seconds
   bool parseIntervalSeconds(const char* intervalStr);
   
-  // 日時文字列のパース "YYYY-MM-DD HH:MM:SS"
-  bool parseDateTime(const char* dateTimeStr);
+  // Parse datetime string "YYYY-MM-DD HH:MM:SS"
+  bool parseDateTime(const char* dateTimeStr, DateTime& dt);
   
-  // 次回実行時刻を計算（Cronモード）
+  // Calculate next execution time (Cron mode)
   void calculateNextExecutionCron();
   
-  // 次回実行時刻を計算（間隔モード）
-  void calculateNextExecutionInterval();
-  
-  // 日時が有効かチェック
-  bool isValidDateTime(const DateTime& dt);
-  
-  // 曜日を計算（ツェラーの公式）
-  int calculateWeekday(int year, int month, int day);
-  
-  // うるう年判定
-  bool isLeapYear(int year);
-  
-  // 月の日数を取得
-  int getDaysInMonth(int year, int month);
-  
-  // DateTime同士の秒数差を計算
-  long getSecondsDifference(const DateTime& from, const DateTime& to);
-  
-  // DateTimeに秒数を加算
-  void addSeconds(DateTime& dt, long seconds);
-  
-  // 次のCron一致時刻を検索
-  bool findNextCronMatch(DateTime& dt);
-  
-  // DateTimeがCron式に合致するかチェック
+  // Check if DateTime matches Cron expression
   bool matchesCron(const DateTime& dt);
   
-  // Cronフィールドが値に合致するかチェック（ステップ値対応）
+  // Check if Cron field matches value (with step value support)
   bool matchesCronField(const CronField& field, int value);
+  
+  // Print Cron field (for debugging)
+  void printCronField(const CronField& field);
 };
 
 #endif // CRON_SCHEDULER_H
